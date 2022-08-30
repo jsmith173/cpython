@@ -546,6 +546,168 @@ pymain_repl(PyConfig *config, int *exitcode)
 }
 
 
+int FileSize(const wchar_t* filename)
+{
+   struct _stat buf;
+   int result;
+   char timebuf[26];
+   errno_t err;
+
+   result = _wstat( filename, &buf );
+
+   // Check if statistics are valid:
+   if( result != 0 )
+   {
+      perror( "Problem getting information" );
+      switch (errno)
+      {
+         case ENOENT:
+           printf("File %s not found.\n", filename);
+           break;
+         case EINVAL:
+           printf("Invalid parameter to _stat.\n");
+           break;
+         default:
+           /* Should never be reached. */
+           printf("Unexpected error in _stat.\n");
+      }
+   }
+   else
+   {
+      return buf.st_size;
+   }
+}
+
+char* search_circuit_id(char* start, int id)
+{
+	int i;
+	char* p;
+	
+    p = start; i = 0;
+	while (i < id) {
+	 while (*p) p++; 
+	 p++; // the zero byte
+	 i++;
+	}
+	return p;
+}
+
+const wchar_t* SYMBOLS_IN_FN = L"symbols_in.dat";
+const wchar_t* SYMBOLS_OUT_FN = L"symbols_out.dat";
+void* circ_buffer_in;
+int num_of_circuit_symbols=0;
+char* pos_strings;
+
+int PyMod_AddCircuitVariables()
+{
+	wchar_t fn[512];
+	FILE *symbol_file;
+	int file_size, numread, nr, stream_pos;
+	char *p, *p0, *p1, *p_sym;
+	int *p_int, datapos, c, iID;
+	double rRe;
+
+	wcscpy(fn, session_folder);
+	wcscat(fn, SYMBOLS_IN_FN);
+	
+    PyObject * module = PyImport_AddModule("__main__"); // borrowed reference
+	if (!module)
+		goto error; 
+
+	PyObject * dictionary = PyModule_GetDict(module);   // borrowed reference
+	if (!dictionary) 
+		goto error;  
+
+    // Load circuit data
+    symbol_file = _wfopen(fn, L"rb");
+    if (symbol_file) {
+        file_size = FileSize(fn);
+        circ_buffer_in = calloc(file_size, 1);
+        numread = fread(circ_buffer_in, 1, file_size, symbol_file);		
+        fclose(symbol_file);
+    }
+	else
+		return 0;
+    //
+	
+	//
+	p = circ_buffer_in; 
+	p += sizeof(int); //version
+	p_int = (int*)p; datapos = *p_int; p += sizeof(int);
+	pos_strings = p;
+	
+	p = p0 = circ_buffer_in; stream_pos = datapos;
+	p = p0+stream_pos;
+
+	c = *((int*)p); stream_pos += sizeof(int); p = p0+stream_pos;
+	num_of_circuit_symbols = c;
+	
+	for (int i=0; i<c; i++) {
+ 	 iID = *((int*)p); stream_pos += sizeof(int); p = p0+stream_pos;
+ 	 rRe = *((double*)p); stream_pos += sizeof(double); p = p0+stream_pos;
+     p_sym = search_circuit_id(pos_strings, iID);
+     PyDict_SetItemString(dictionary, p_sym, Py_BuildValue("d", rRe));
+	}
+	
+	//
+	
+	return 1;
+	
+error:
+	return 0;
+}	
+
+int PyMod_SaveCircuitVariables()
+{
+	wchar_t fn[512];
+	FILE *symbol_file;
+	PyObject *py_obj;
+	char *p, *p_sym;
+	double rRe;
+	int file_size, numwrite;
+	void* circ_buffer_out;
+
+    PyObject * module = PyImport_AddModule("__main__"); // borrowed reference
+	if (!module)
+		goto error; 
+
+	PyObject * dictionary = PyModule_GetDict(module);   // borrowed reference
+	if (!dictionary) 
+		goto error;  
+
+    file_size = 2*sizeof(int);
+	file_size += num_of_circuit_symbols*sizeof(double);
+    circ_buffer_out = calloc(file_size, 1);
+
+    p = circ_buffer_out;
+	*((int*)p) = error_state; p += sizeof(int);
+	*((int*)p) = num_of_circuit_symbols; p += sizeof(int);
+	
+	for (int i=0; i<num_of_circuit_symbols; i++) {
+     p_sym = search_circuit_id(pos_strings, i);
+     py_obj = PyDict_GetItem(dictionary, PyUnicode_FromString(p_sym));
+     rRe = PyFloat_AsDouble(py_obj);
+ 	 *((double*)p) = rRe; p += sizeof(double);
+	}
+	
+	wcscpy(fn, session_folder);
+	wcscat(fn, SYMBOLS_OUT_FN);
+    symbol_file = _wfopen(fn, L"wb");
+    if (symbol_file) {
+        numwrite = fwrite(circ_buffer_out, 1, file_size, symbol_file);
+        fclose(symbol_file);
+    }
+	else
+		return 0;
+	
+	
+	free(circ_buffer_out);
+	return 1;
+	
+error:
+	return 0;
+}
+
 static void
 pymain_run_python(int *exitcode)
 {
@@ -597,6 +759,11 @@ pymain_run_python(int *exitcode)
 
     pymain_header(config);
 
+    //
+    ExtractFilePath(session_folder, config->run_filename);
+	symbols_in_found = PyMod_AddCircuitVariables();
+	//
+	
     if (config->run_command) {
         *exitcode = pymain_run_command(config->run_command);
     }
@@ -612,6 +779,10 @@ pymain_run_python(int *exitcode)
     else {
         *exitcode = pymain_run_stdin(config);
     }
+
+    //
+    PyMod_SaveCircuitVariables();
+    //
 
     pymain_repl(config, exitcode);
     goto done;

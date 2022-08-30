@@ -938,6 +938,7 @@ print_exception_traceback(struct exception_print_context *ctx, PyObject *value)
                 header_margin = "+ ";
             }
         }
+        error_state = 1;
         err = _PyTraceBack_Print_Indented(
             tb, EXC_INDENT(ctx), EXC_MARGIN(ctx), header_margin, header, f);
     }
