@@ -598,6 +598,10 @@ void* circ_buffer_in;
 int num_of_circuit_symbols=0;
 char* pos_strings;
 
+#define I_REAL 0
+#define I_CPLX 1
+
+
 int PyMod_AddCircuitVariables()
 {
 	wchar_t fn[512];
@@ -605,7 +609,9 @@ int PyMod_AddCircuitVariables()
 	int file_size, numread, nr, stream_pos;
 	char *p, *p0, *p1, *p_sym;
 	int *p_int, datapos, c, iID;
-	double rRe;
+	double rRe, rIm;
+    Py_complex cval;
+	unsigned char NumType;
 
 	wcscpy(fn, session_folder);
 	wcscat(fn, SYMBOLS_IN_FN);
@@ -643,10 +649,24 @@ int PyMod_AddCircuitVariables()
 	num_of_circuit_symbols = c;
 	
 	for (int i=0; i<c; i++) {
+ 	 NumType = *((unsigned char*)p); stream_pos += sizeof(unsigned char); p = p0+stream_pos;
  	 iID = *((int*)p); stream_pos += sizeof(int); p = p0+stream_pos;
- 	 rRe = *((double*)p); stream_pos += sizeof(double); p = p0+stream_pos;
      p_sym = search_circuit_id(pos_strings, iID);
-     PyDict_SetItemString(dictionary, p_sym, Py_BuildValue("d", rRe));
+	 
+	 if (NumType == I_REAL) {
+ 	  rRe = *((double*)p); stream_pos += sizeof(double); p = p0+stream_pos;
+      PyDict_SetItemString(dictionary, p_sym, Py_BuildValue("d", rRe));
+	 }
+	 else if (NumType == I_CPLX) {
+ 	  rRe = *((double*)p); stream_pos += sizeof(double); p = p0+stream_pos;
+ 	  rIm = *((double*)p); stream_pos += sizeof(double); p = p0+stream_pos;
+	  cval.real = rRe;
+	  cval.imag = rIm;
+      PyDict_SetItemString(dictionary, p_sym, PyComplex_FromCComplex(cval));
+	 }
+	 else {
+		 /* set an error message */
+	 }
 	}
 	
 	//
@@ -663,9 +683,12 @@ int PyMod_SaveCircuitVariables()
 	FILE *symbol_file;
 	PyObject *py_obj;
 	char *p, *p_sym;
-	double rRe;
+	double rRe, rIm;
 	int file_size, numwrite;
 	void* circ_buffer_out;
+    Py_complex cval;
+	unsigned char NumType;
+	
 
     PyObject * module = PyImport_AddModule("__main__"); // borrowed reference
 	if (!module)
@@ -676,7 +699,7 @@ int PyMod_SaveCircuitVariables()
 		goto error;  
 
     file_size = 2*sizeof(int);
-	file_size += num_of_circuit_symbols*sizeof(double);
+	file_size += num_of_circuit_symbols*(2*sizeof(double)+sizeof(unsigned char));
     circ_buffer_out = calloc(file_size, 1);
 
     p = circ_buffer_out;
@@ -686,8 +709,21 @@ int PyMod_SaveCircuitVariables()
 	for (int i=0; i<num_of_circuit_symbols; i++) {
      p_sym = search_circuit_id(pos_strings, i);
      py_obj = PyDict_GetItem(dictionary, PyUnicode_FromString(p_sym));
-     rRe = PyFloat_AsDouble(py_obj);
- 	 *((double*)p) = rRe; p += sizeof(double);
+	 if (PyFloat_Check(py_obj)) {
+ 	  NumType = I_REAL; *((unsigned char*)p) = NumType; p += sizeof(unsigned char);
+      rRe = PyFloat_AsDouble(py_obj);
+ 	  *((double*)p) = rRe; p += sizeof(double);
+ 	  rIm = 0; *((double*)p) = rIm; p += sizeof(double);
+	 }
+	 else if (PyComplex_Check(py_obj)) {
+ 	  NumType = I_CPLX; *((unsigned char*)p) = NumType; p += sizeof(unsigned char);
+      cval = PyComplex_AsCComplex(py_obj);
+ 	  *((double*)p) = cval.real; p += sizeof(double);
+ 	  *((double*)p) = cval.imag; p += sizeof(double);
+	 }
+	 else {
+		 /* set an error message */
+	 }
 	}
 	
 	wcscpy(fn, session_folder);
