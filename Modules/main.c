@@ -597,6 +597,9 @@ const wchar_t* SYMBOLS_OUT_FN = L"symbols_out.dat";
 void* circ_buffer_in;
 int num_of_circuit_symbols=0;
 char* pos_strings;
+const char* CURVES = "curves";
+const char* CURVES_PREFS = "curves_prefs";
+const wchar_t* CURVES_OUT_FN = L"curves_out.dat";
 
 #define I_REAL 0
 #define I_CPLX 1
@@ -677,17 +680,28 @@ error:
 	return 0;
 }	
 
+typedef struct _draw_pref_t {
+    int typ;
+    double l_limit, r_limit;
+	int i_subdiv;
+	wchar_t *u_par, *u_res, *n_par, *n_res;
+	int curvecolor, curvewidth;
+	wchar_t *pagename;
+	int flags;
+} draw_pref_t;
+
 int PyMod_SaveCircuitVariables()
 {
 	wchar_t fn[512];
 	FILE *symbol_file;
-	PyObject *py_obj;
+	PyObject *py_obj, *pValue, *pList, * pResult;
 	char *p, *p_sym;
-	double rRe, rIm;
-	int file_size, numwrite;
-	void* circ_buffer_out;
+	double rRe, rIm, x, y, step;
+	int file_size, numwrite, i, N, j, M, nw, alloc_size, len;
+	void *circ_buffer_out, *curve_buffer_out;
     Py_complex cval;
 	unsigned char NumType;
+	draw_pref_t draw_pref;
 	
 
     PyObject * module = PyImport_AddModule("__main__"); // borrowed reference
@@ -735,9 +749,96 @@ int PyMod_SaveCircuitVariables()
     }
 	else
 		return 0;
-	
-	
 	free(circ_buffer_out);
+	
+	//
+	alloc_size = 163840;
+    curve_buffer_out = calloc(alloc_size, 1);
+	p = curve_buffer_out;
+	
+    PyObject* CurvesPrefs = PyDict_GetItem(dictionary, PyUnicode_FromString(CURVES_PREFS));
+	if (CurvesPrefs && PyList_Check(CurvesPrefs)) {
+		N = PyList_Size(CurvesPrefs);
+        //*((int*)p) = N; p += sizeof(int);
+		for (i=0; i<N; i++) {
+            PyObject *CurvePref = PyList_GetItem(CurvesPrefs, i);
+            if (CurvePref && PyDict_Check(CurvePref)) {
+				
+                PyObject* l_limit = PyDict_GetItem(CurvePref, PyUnicode_FromString("l_limit"));
+				if (l_limit && PyFloat_Check(l_limit)) {
+                     draw_pref.l_limit = PyFloat_AsDouble(l_limit);
+				}
+				else {
+            		 /* set an error message */
+				}
+				
+                PyObject* r_limit = PyDict_GetItem(CurvePref, PyUnicode_FromString("r_limit"));
+				if (r_limit && PyFloat_Check(r_limit)) {
+                     draw_pref.r_limit = PyFloat_AsDouble(r_limit);
+				}
+				else {
+            		 /* set an error message */
+				}
+				
+                PyObject* i_subdiv = PyDict_GetItem(CurvePref, PyUnicode_FromString("i_subdiv"));
+				if (i_subdiv && PyLong_Check(i_subdiv)) {
+                     draw_pref.i_subdiv = PyLong_AsLong(i_subdiv);
+				}
+				else {
+            		 /* set an error message */
+				}
+				
+                PyObject* u_par = PyDict_GetItem(CurvePref, PyUnicode_FromString("u_par"));
+				if (u_par && PyUnicode_Check(u_par)) {
+                    draw_pref.u_par = PyUnicode_AsWideCharString(u_par, &len);
+				}
+				else {
+            		 /* set an error message */
+				}
+				
+				step = (draw_pref.r_limit-draw_pref.l_limit)/draw_pref.i_subdiv;
+            		 /* set an error message : zero*/
+				
+			}
+		}
+	}
+	
+    PyObject* Curves = PyDict_GetItem(dictionary, PyUnicode_FromString(CURVES));
+	if (Curves && PyList_Check(Curves)) {
+		N = PyList_Size(Curves);
+        *((int*)p) = N; p += sizeof(int);
+		for (i=0; i<N; i++) {
+            PyObject *Curve = PyList_GetItem(Curves, i);
+            if (Curve && PyList_Check(Curve)) {
+                M = PyList_Size(Curve);
+                *((int*)p) = M; p += sizeof(int);
+				x = draw_pref.l_limit;
+                for (j=0; j<M; j++) {
+                    PyObject *Value = PyList_GetItem(Curve, j);
+                    if (Value && PyFloat_Check(Value)) {
+                        y = PyFloat_AsDouble(Value);
+ 	                    *((double*)p) = x; p += sizeof(double);
+ 	                    *((double*)p) = y; p += sizeof(double);
+						x += step;
+                    }
+                }
+            }
+		}	
+	}
+	nw = p-curve_buffer_out;
+	
+	wcscpy(fn, session_folder);
+	wcscat(fn, CURVES_OUT_FN);
+    symbol_file = _wfopen(fn, L"wb");
+    if (symbol_file) {
+        numwrite = fwrite(curve_buffer_out, 1, nw, symbol_file);
+        fclose(symbol_file);
+    }
+	else
+		return 0;
+	free(curve_buffer_out);
+	//
+	
 	return 1;
 	
 error:
