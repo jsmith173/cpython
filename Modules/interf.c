@@ -35,11 +35,17 @@ const wchar_t* CURVES_OUT_FN = L"curves_out.dat";
 #define I_REAL 0
 #define I_CPLX 1
 
+#define DP_SAVE 1
+#define DP_CHECKSIZE 0
+
+#define ERROR_BUFFER_SIZE 512
+#define EPS (1e-15)
+
 typedef struct _draw_pref_t {
     int typ;
     double l_limit, r_limit;
 	int i_subdiv;
-	wchar_t *u_par, *u_res, *n_par, *n_res;
+	wchar_t *u_par, *u_res, *n_par, *n_res, *fname;
 	int curvecolor, curvewidth;
 	wchar_t *pagename;
 	int flags;
@@ -168,69 +174,210 @@ error:
 	return 0;
 }	
 
-int PyMod_SaveCurves(PyObject * dictionary)
+char* write_string(wchar_t* s, char* p)
+{
+	int copied, len = wcslen(s);
+    char* p1;
+
+    *((int*)p) = len; p += sizeof(int); p1 = p;
+    wcscpy(p, s); p += len*sizeof(s[0]);
+    copied = (int)(p - p1);
+    return p;
+}
+
+char* write_ansistring(char* s, char* p)
+{
+	int copied, len = strlen(s);
+	char* p1;
+	
+    *((int*)p) = len; p += sizeof(int); p1 = p;
+    strcpy(p, s); p += len;
+	copied = (int)(p-p1);
+    return p;
+}
+
+char* set_curve_status(int st, char* p, char* err)
+{
+ *((int*)p) = st; p += sizeof(st); 
+ return write_ansistring(err, p);
+}
+
+enum TDrawPrefField {
+	Dp_typ=0, Dp_l_limit, Dp_r_limit, Dp_i_subdiv,
+	Dp_u_par, Dp_u_res, Dp_n_par, Dp_n_res,
+	Dp_curvecolor, Dp_curvewidth, Dp_pagename, Dp_fname, Dp_flags	
+}; 
+
+char* process_draw_pref(PyObject *CurvePref, draw_pref_t* draw_pref, char* p, int* len, char* err, int dp_save, int* iRet)
+{
+	int item_size, tmp, size=0, item_code, N=0, *i_item_ptr;
+	char field[128], *p_item_num;
+	PyObject* PyField;
+	wchar_t* s_item_ptr;
+	double* r_item_ptr;
+	
+	*iRet = 1;
+	p_item_num = p; p += sizeof(N); size += sizeof(N); 
+	
+	for (int i=0; i<2; i++) {
+		if (i == 0) { strcpy(field, "l_limit"); item_code = Dp_l_limit; r_item_ptr = &draw_pref->l_limit; } 
+		if (i == 1) { strcpy(field, "r_limit"); item_code = Dp_r_limit; r_item_ptr = &draw_pref->r_limit; } 
+		
+		PyField = PyDict_GetItem(CurvePref, PyUnicode_FromString(field));
+		if (PyField && PyFloat_Check(PyField)) {
+			 *r_item_ptr = PyFloat_AsDouble(PyField);
+			 item_size = sizeof(double); size += item_size; size += sizeof(item_code); N++;
+			 if (dp_save) { 
+			  *((int*)p) = item_code; p += sizeof(item_code);
+			  memcpy(p, r_item_ptr, item_size); p += item_size; 
+			 }
+		}
+		else {
+			sprintf(err, "draw_pref: field %s not found", field);
+			goto error;
+		}
+	}
+
+	for (int i=0; i<5; i++) {
+		if (i == 0) { strcpy(field, "typ"); item_code = Dp_typ; i_item_ptr = &draw_pref->typ; } 
+		if (i == 1) { strcpy(field, "i_subdiv"); item_code = Dp_i_subdiv; i_item_ptr = &draw_pref->i_subdiv; } 
+		if (i == 2) { strcpy(field, "curvecolor"); item_code = Dp_curvecolor; i_item_ptr = &draw_pref->curvecolor; } 
+		if (i == 3) { strcpy(field, "curvewidth"); item_code = Dp_curvewidth; i_item_ptr = &draw_pref->curvewidth; } 
+		if (i == 4) { strcpy(field, "flags"); item_code = Dp_flags; i_item_ptr = &draw_pref->flags; } 
+		
+		PyField = PyDict_GetItem(CurvePref, PyUnicode_FromString(field));
+		if (PyField && PyLong_Check(PyField)) {
+			 *i_item_ptr = PyLong_AsLong(PyField);
+			 item_size = sizeof(int); size += item_size; size += sizeof(item_code); N++;
+			 if (dp_save) { 
+			  *((int*)p) = item_code; p += sizeof(item_code);
+			  memcpy(p, i_item_ptr, item_size); p += item_size; 
+			 }
+		}
+		else if (item_code == Dp_typ) {
+			sprintf(err, "draw_pref: field %s not found", field);
+			goto error;
+		}
+	}
+
+	for (int i=0; i<6; i++) {
+		if (i == 0) { strcpy(field, "u_par"); item_code = Dp_u_par; } 
+		if (i == 1) { strcpy(field, "u_res"); item_code = Dp_u_res; } 
+		if (i == 2) { strcpy(field, "n_par"); item_code = Dp_n_par; } 
+		if (i == 3) { strcpy(field, "n_res"); item_code = Dp_n_res; } 
+		if (i == 4) { strcpy(field, "pagename"); item_code = Dp_pagename; } 
+		if (i == 5) { strcpy(field, "fname"); item_code = Dp_fname; } 
+		
+		PyField = PyDict_GetItem(CurvePref, PyUnicode_FromString(field));
+		if (PyField && PyUnicode_Check(PyField)) {
+			 s_item_ptr = PyUnicode_AsWideCharString(PyField, &tmp);
+			 item_size = wcslen(s_item_ptr)*sizeof(wchar_t)+sizeof(int); size += item_size; size += sizeof(item_code); N++;
+			 if (dp_save) { 
+			  *((int*)p) = item_code; p += sizeof(item_code);
+			  p = write_string(s_item_ptr, p); 
+			 }
+		}
+		else if (item_code == Dp_fname) {
+			sprintf(err, "draw_pref: field %s not found", field);
+			goto error;
+		}
+	}
+	
+	
+    if (dp_save) *((int*)p_item_num) = N;
+	*len = size;
+	
+done:	
+	return p;
+	
+error:
+	*iRet = 0;
+	return NULL;
+	
+}
+
+int Curves_CalcSize(PyObject* dictionary, char* err, int* len)
 {
 	wchar_t fn[512];
 	FILE *symbol_file;
 	PyObject *py_obj, *pValue, *pList, * pResult;
-	char *p, *p_sym;
+	char *p=NULL, *p_sym;
 	double rRe, rIm, x, y, step;
-	int file_size, numwrite, i, N, j, M, nw, alloc_size, len;
+	int file_size, numwrite, i, N, j, M, nw, alloc_size, item_len, size, iRet;
 	void *circ_buffer_out, *curve_buffer_out;
     Py_complex cval;
 	unsigned char NumType;
 	draw_pref_t draw_pref;
 	
-	//
-	alloc_size = 163840;
-    curve_buffer_out = calloc(alloc_size, 1);
-	p = curve_buffer_out;
-	
+	size = 0; *len = size;
     PyObject* CurvesPrefs = PyDict_GetItem(dictionary, PyUnicode_FromString(CURVES_PREFS));
 	if (CurvesPrefs && PyList_Check(CurvesPrefs)) {
 		N = PyList_Size(CurvesPrefs);
-        //*((int*)p) = N; p += sizeof(int);
 		for (i=0; i<N; i++) {
             PyObject *CurvePref = PyList_GetItem(CurvesPrefs, i);
             if (CurvePref && PyDict_Check(CurvePref)) {
-				
-                PyObject* l_limit = PyDict_GetItem(CurvePref, PyUnicode_FromString("l_limit"));
-				if (l_limit && PyFloat_Check(l_limit)) {
-                     draw_pref.l_limit = PyFloat_AsDouble(l_limit);
-				}
-				else {
-            		 /* set an error message */
-				}
-				
-                PyObject* r_limit = PyDict_GetItem(CurvePref, PyUnicode_FromString("r_limit"));
-				if (r_limit && PyFloat_Check(r_limit)) {
-                     draw_pref.r_limit = PyFloat_AsDouble(r_limit);
-				}
-				else {
-            		 /* set an error message */
-				}
-				
-                PyObject* i_subdiv = PyDict_GetItem(CurvePref, PyUnicode_FromString("i_subdiv"));
-				if (i_subdiv && PyLong_Check(i_subdiv)) {
-                     draw_pref.i_subdiv = PyLong_AsLong(i_subdiv);
-				}
-				else {
-            		 /* set an error message */
-				}
-				
-                PyObject* u_par = PyDict_GetItem(CurvePref, PyUnicode_FromString("u_par"));
-				if (u_par && PyUnicode_Check(u_par)) {
-                    draw_pref.u_par = PyUnicode_AsWideCharString(u_par, &len);
-				}
-				else {
-            		 /* set an error message */
-				}
-				
-				step = (draw_pref.r_limit-draw_pref.l_limit)/draw_pref.i_subdiv;
-            		 /* set an error message : zero*/
-				
+                p = process_draw_pref(CurvePref, &draw_pref, p, &item_len, err, DP_CHECKSIZE, &iRet);
+				if (!iRet) goto error;
+				size += item_len;
 			}
 		}
+	}
+	
+	item_len = 0;
+	size += sizeof(N);
+    PyObject* Curves = PyDict_GetItem(dictionary, PyUnicode_FromString(CURVES));
+	if (Curves && PyList_Check(Curves)) {
+		N = PyList_Size(Curves);
+		for (i=0; i<N; i++) {
+            PyObject *Curve = PyList_GetItem(Curves, i);
+            if (Curve && PyList_Check(Curve)) {
+                M = PyList_Size(Curve);
+				item_len += sizeof(M);
+				item_len += M*(sizeof(x)+sizeof(y));
+            }
+		}	
+	}
+	size += item_len;
+	
+done:	
+	*len = size;
+	return 1;
+	
+error:
+	return 0;
+	
+}
+
+int PyMod_SaveCurves(PyObject* dictionary)
+{
+	wchar_t fn[512];
+	char err[ERROR_BUFFER_SIZE];
+	FILE *symbol_file;
+	PyObject *py_obj, *pValue, *pList, * pResult;
+	char *p, *p_sym, *p_status;
+	double rRe, rIm, x, y, step;
+	int file_size, numwrite, i, j, N=0, N1=0, M, nw, alloc_size, len, iRet, status_size;
+	void *curve_buffer_out=NULL;
+    Py_complex cval;
+	unsigned char NumType;
+	draw_pref_t draw_pref;
+	
+	//
+	memset(err, 0, sizeof(err));
+	status_size = sizeof(iRet)+sizeof(err);
+    iRet = Curves_CalcSize(dictionary, err, &alloc_size);
+	alloc_size += status_size;
+    curve_buffer_out = calloc(alloc_size, 1); p = p_status = curve_buffer_out;
+	p = set_curve_status(1, p_status, "OK"); p = p_status+status_size;
+	
+	if (!iRet) {
+		set_curve_status(iRet, p_status, err);
+		goto error;
+	}
+	
+    PyObject* CurvesPrefs = PyDict_GetItem(dictionary, PyUnicode_FromString(CURVES_PREFS));
+	if (CurvesPrefs && PyList_Check(CurvesPrefs)) {
+ 	 N1 = PyList_Size(CurvesPrefs);
 	}
 	
     PyObject* Curves = PyDict_GetItem(dictionary, PyUnicode_FromString(CURVES));
@@ -241,6 +388,23 @@ int PyMod_SaveCurves(PyObject * dictionary)
             PyObject *Curve = PyList_GetItem(Curves, i);
             if (Curve && PyList_Check(Curve)) {
                 M = PyList_Size(Curve);
+				
+                PyObject *CurvePref = PyList_GetItem(CurvesPrefs, i);
+                if (CurvePref && PyDict_Check(CurvePref)) {
+                    p = process_draw_pref(CurvePref, &draw_pref, p, &len, err, DP_SAVE, &iRet);
+                    if (!iRet) {
+		                set_curve_status(iRet, p_status, err);
+                        goto error;
+                    }
+                    step = (draw_pref.r_limit-draw_pref.l_limit)/draw_pref.i_subdiv;
+					if (step < 0 || fabs(step) < EPS) {
+			            sprintf(err, "draw_pref: step is invalid");
+		                set_curve_status(iRet, p_status, err);
+			            goto error;						
+					}
+				
+                }			
+				
                 *((int*)p) = M; p += sizeof(int);
 				x = draw_pref.l_limit;
                 for (j=0; j<M; j++) {
@@ -260,16 +424,26 @@ int PyMod_SaveCurves(PyObject * dictionary)
 	}
 	nw = p-curve_buffer_out;
 	
-	wcscpy(fn, session_folder);
-	wcscat(fn, CURVES_OUT_FN);
-    symbol_file = _wfopen(fn, L"wb");
-    if (symbol_file) {
-        numwrite = fwrite(curve_buffer_out, 1, nw, symbol_file);
-        fclose(symbol_file);
-    }
-	else
-		return 0;
+	if (N) {
+		wcscpy(fn, session_folder);
+		wcscat(fn, CURVES_OUT_FN);
+		symbol_file = _wfopen(fn, L"wb");
+		if (symbol_file) {
+			numwrite = fwrite(curve_buffer_out, 1, nw, symbol_file);
+			fclose(symbol_file);
+		}
+		else
+			return 0;
+	}
+	
+done:	
 	free(curve_buffer_out);
+    return 1;
+	
+error:
+	free(curve_buffer_out);
+	return 0;
+
 	//
 	
 }
