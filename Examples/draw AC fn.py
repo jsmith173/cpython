@@ -1,4 +1,7 @@
-import math
+import math, cmath
+
+C1 = 1e-6
+R1 = 159.23
 
 #Keep the program structure, variable names (curves, curves_prefs)
 curves = []
@@ -14,8 +17,7 @@ draw_pref1 = {'typ': 2, 'l_limit': 10.0, 'r_limit': 1e6, 'i_subdiv': 100,
 def frange(l, h, np):
     p = 0
     while True:
-        temp = float(start + count * step)
-		temp = l * (10 ** (math.log10(h / l) / np * p))
+        temp = l * (10 ** (math.log10(h / l) / np * p))
         if temp >= h:
             break
         yield temp
@@ -24,12 +26,14 @@ def frange(l, h, np):
 #fn1: calculate values ( AC, user defined )
 def fn1_create_curve():
 	values = []
-	for x in frange(draw_pref1['l_limit'], draw_pref1['r_limit'], draw_pref1['i_subdiv']-1):
+	for f in frange(draw_pref1['l_limit'], draw_pref1['r_limit'], draw_pref1['i_subdiv']-1):
 	
 		#type your function here
-		y = math.sin(x)
+		s = complex(0, 2*cmath.pi*f)
+		z = 1/(1+C1*R1*s)
+		pair = [s, z]
 		
-		values.append(y)
+		values.append(pair)
 	return values
 
 mycurve1 = fn1_create_curve()

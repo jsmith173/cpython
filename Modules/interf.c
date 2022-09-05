@@ -333,7 +333,7 @@ int Curves_CalcSize(PyObject* dictionary, char* err, int* len)
             if (Curve && PyList_Check(Curve)) {
                 M = PyList_Size(Curve);
 				item_len += sizeof(M);
-				item_len += M*(sizeof(x)+sizeof(y));
+				item_len += M*(sizeof(int)+2*(sizeof(unsigned char)+sizeof(cval))); // max size (real type data is smaller)
             }
 		}	
 	}
@@ -355,8 +355,8 @@ int PyMod_SaveCurves(PyObject* dictionary)
 	FILE *symbol_file;
 	PyObject *py_obj, *pValue, *pList, * pResult;
 	char *p, *p_sym, *p_status;
-	double rRe, rIm, x, y, step;
-	int file_size, numwrite, i, j, N=0, N1=0, M, nw, alloc_size, len, iRet, status_size;
+	double rRe, rIm, x, y, step, r;
+	int file_size, numwrite, i, j, k, K, N=0, N1=0, M, nw, alloc_size, len, iRet, status_size;
 	void *curve_buffer_out=NULL;
     Py_complex cval;
 	unsigned char NumType;
@@ -408,13 +408,31 @@ int PyMod_SaveCurves(PyObject* dictionary)
                 *((int*)p) = M; p += sizeof(int);
 				x = draw_pref.l_limit;
                 for (j=0; j<M; j++) {
-                    PyObject *Value = PyList_GetItem(Curve, j);
-                    if (Value && PyFloat_Check(Value)) {
-                        y = PyFloat_AsDouble(Value);
- 	                    *((double*)p) = x; p += sizeof(double);
- 	                    *((double*)p) = y; p += sizeof(double);
-						x += step;
-                    }
+                    PyObject *List = PyList_GetItem(Curve, j);
+					if (List && PyList_Check(List)) {
+                        K = PyList_Size(List);
+                        if (K != 2) {
+			             sprintf(err, "SaveCurves: expected number of items in curve point is 2");
+		                 set_curve_status(0, p_status, err);
+                         goto error;
+                        }
+                        *((int*)p) = K; p += sizeof(int);
+                        for (k=0; k<K; k++) {
+                            PyObject *Value = PyList_GetItem(List, k);
+							if (Value && PyFloat_Check(Value)) {
+ 	                            NumType = I_REAL; *((unsigned char*)p) = NumType; p += sizeof(unsigned char);
+								r = PyFloat_AsDouble(Value);
+								*((double*)p) = r; p += sizeof(double);
+							}
+                       	    else if (Value && PyComplex_Check(Value)) {
+ 	                            NumType = I_CPLX; *((unsigned char*)p) = NumType; p += sizeof(unsigned char);
+                                cval = PyComplex_AsCComplex(Value);
+       	                        *((double*)p) = cval.real; p += sizeof(double);
+ 	                            *((double*)p) = cval.imag; p += sizeof(double);
+							}
+						}
+					}
+
                 }
             }
 		}	
