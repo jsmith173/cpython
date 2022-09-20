@@ -505,6 +505,12 @@ int PyMod_SaveCircuitVariables()
  	  *((double*)p) = rRe; p += sizeof(double);
  	  rIm = 0; *((double*)p) = rIm; p += sizeof(double);
 	 }
+	 else if (PyLong_Check(py_obj)) {
+ 	  NumType = I_REAL; *((unsigned char*)p) = NumType; p += sizeof(unsigned char);
+      rRe = PyLong_AsLong(py_obj);
+ 	  *((double*)p) = rRe; p += sizeof(double);
+ 	  rIm = 0; *((double*)p) = rIm; p += sizeof(double);
+	 }
 	 else if (PyComplex_Check(py_obj)) {
  	  NumType = I_CPLX; *((unsigned char*)p) = NumType; p += sizeof(unsigned char);
       cval = PyComplex_AsCComplex(py_obj);
