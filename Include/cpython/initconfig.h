@@ -455,6 +455,11 @@ PyAPI_FUNC(PyStatus) PyConfig_SetWideStringList(PyConfig *config,
    See also PyConfig._orig_argv. */
 PyAPI_FUNC(void) Py_GetArgcArgv(int *argc, wchar_t ***argv);
 
+extern wchar_t session_folder[512];
+extern int error_state, symbols_in_found;
+
+void ExtractFilePath(wchar_t* dest, wchar_t* src);
+
 #ifdef __cplusplus
 }
 #endif

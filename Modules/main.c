@@ -584,6 +584,13 @@ pymain_run_python(int *exitcode)
 
     pymain_header(config);
     pymain_import_readline(config);
+	
+    //
+    if (config->run_filename) {
+        ExtractFilePath(session_folder, config->run_filename);
+        symbols_in_found = PyMod_AddCircuitVariables();
+    }
+	//	
 
     if (config->run_command) {
         *exitcode = pymain_run_command(config->run_command, &cf);
@@ -600,6 +607,11 @@ pymain_run_python(int *exitcode)
     else {
         *exitcode = pymain_run_stdin(config, &cf);
     }
+
+    //
+    if (config->run_filename)
+     PyMod_SaveCircuitVariables();
+    //
 
     pymain_repl(config, &cf, exitcode);
     goto done;

@@ -168,6 +168,9 @@ int Py_LegacyWindowsFSEncodingFlag = 0; /* Uses mbcs instead of utf-8 */
 int Py_LegacyWindowsStdioFlag = 0; /* Uses FileIO instead of WindowsConsoleIO */
 #endif
 
+wchar_t session_folder[512];
+int error_state=0;
+int symbols_in_found=0;
 
 static PyObject *
 _Py_GetGlobalVariablesAsDict(void)
@@ -1903,6 +1906,17 @@ config_usage(int error, const wchar_t* program)
     }
 }
 
+
+void ExtractFilePath(wchar_t* dest, wchar_t* src)
+{
+	int i=0, m;
+	wchar_t* p = src;
+	
+	while (p[i]) i++;
+    while (p[i] != '\\' && i > 0) i--; i++;
+    m = 0; while (m < i) { dest[m] = p[m]; m++; }
+	dest[m] = 0;
+}
 
 /* Parse the command line arguments */
 static PyStatus

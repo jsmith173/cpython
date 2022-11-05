@@ -854,8 +854,10 @@ print_exception(PyObject *f, PyObject *value)
     fflush(stdout);
     type = (PyObject *) Py_TYPE(value);
     tb = PyException_GetTraceback(value);
-    if (tb && tb != Py_None)
+    if (tb && tb != Py_None) {
+		error_state = 1;
         err = PyTraceBack_Print(tb, f);
+	}
     if (err == 0 &&
         _PyObject_HasAttrId(value, &PyId_print_file_and_line))
     {
