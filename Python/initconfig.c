@@ -171,6 +171,8 @@ int Py_LegacyWindowsStdioFlag = 0; /* Uses FileIO instead of WindowsConsoleIO */
 wchar_t session_folder[512];
 int error_state=0;
 int symbols_in_found=0;
+FILE* log_file;
+wchar_t log_fn[512];
 
 static PyObject *
 _Py_GetGlobalVariablesAsDict(void)
@@ -2770,4 +2772,20 @@ _Py_DumpPathConfig(PyThreadState *tstate)
     }
 
     _PyErr_Restore(tstate, exc_type, exc_value, exc_tb);
+}
+
+void py_init_log()
+{
+	wcscpy(log_fn, session_folder);
+	wcscat(log_fn, L"cpython_log.txt");
+	
+	log_file = _wfopen(log_fn, L"wt");
+	fclose(log_file);
+}
+
+void py_write_log(char* s)
+{
+	log_file = _wfopen(log_fn, L"at");
+	fprintf(log_file, s);
+	fclose(log_file);
 }

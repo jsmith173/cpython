@@ -538,6 +538,38 @@ pymain_repl(PyConfig *config, PyCompilerFlags *cf, int *exitcode)
     *exitcode = (res != 0);
 }
 
+#define COMM_BUF_SIZE 100*1024
+
+//#define DEBUGMSG
+//#define TESTING
+
+#ifdef DEBUGMSG
+#define DBG(fmt, ...) \
+ do { \
+	 log_file = _wfopen(log_fn, L"at"); \
+	 fprintf(log_file, fmt, ##__VA_ARGS__); \
+	 fclose(log_file); \
+ } while(0) 
+#else
+#define DBG
+#endif
+
+#define PY_SUSPEND 0
+#define PY_COMPILE 1
+#define PY_EXIT 2
+#define PY_GETSIGNAL 3
+
+#define PY_ST_NEW_DATA 0
+#define PY_ST_CLIENT_OK 1
+#define PY_ST_CLIENT_ERR 2
+
+#define DTTMFMT "%Y-%m-%d %H:%M:%S "
+#define DTTMSZ 64
+static char *getDtTm (char *buff) {
+    time_t t = time (0);
+    strftime (buff, DTTMSZ, DTTMFMT, localtime (&t));
+    return buff;
+}
 
 static void
 pymain_run_python(int *exitcode)
@@ -586,27 +618,113 @@ pymain_run_python(int *exitcode)
     pymain_import_readline(config);
 	
     //
+    TCHAR szName[] = TEXT("PyFileMappingObject1");
+    HANDLE hMapFile;
+    LPCTSTR pCommBuf;
+	char time_buff[DTTMSZ];
+	char *p;
+	int *p_int, *p_instr, *p_status, *p_err, comm_en, instr, err_code, ret_val, comm_progress=1, c=0;
+	double *p_input, *p_output, r_par, r_result;
+
     if (config->run_filename) {
         ExtractFilePath(session_folder, config->run_filename);
+    }
+
+	#ifdef TESTING
+	*exitcode = pymain_run_file(config, &cf);
+	ret_val = PyMod_GetSignalValue("Signal", 0.001, &r_result, &err_code);
+	return;
+	#endif
+	
+    #ifdef DEBUGMSG
+    py_init_log();
+	#endif
+    DBG( "%s: log file created\n", getDtTm (time_buff));
+    hMapFile = OpenFileMapping(
+        FILE_MAP_ALL_ACCESS,   // read/write access
+        FALSE,                 // do not inherit the name
+        szName);               // name of mapping object
+    if (hMapFile == NULL)
+    {
+        goto error;
+    }
+    DBG( "%s: OpenFileMapping: SUCCESS\n", __FUNCTION__);
+    pCommBuf = MapViewOfFile(hMapFile, // handle to map object
+        FILE_MAP_ALL_ACCESS,  // read/write permission
+        0,
+        0,
+        COMM_BUF_SIZE);
+    if (pCommBuf == NULL)
+    {
+        goto error;
+    }
+    DBG( "%s: MapViewOfFile: SUCCESS\n", __FUNCTION__);
+	p = pCommBuf; p += sizeof(int); //version
+	p_int = (int*)p; comm_en = *p_int; p += sizeof(int);
+    DBG( "%s: COMM_EN: %d\n", __FUNCTION__, comm_en);
+	p_int = (int*)p; p_instr = p_int; instr = *p_int; p += sizeof(int);
+	p_int = (int*)p; p_status = p_int; p += sizeof(int);
+	p_int = (int*)p; p_err = p_int; p += sizeof(int);
+	p_input = (double*)p; p += sizeof(double);
+	p_output = (double*)p; p += sizeof(double);
+
+    if (config->run_filename) {
         symbols_in_found = PyMod_AddCircuitVariables();
     }
 	//	
 
-    if (config->run_command) {
-        *exitcode = pymain_run_command(config->run_command, &cf);
-    }
-    else if (config->run_module) {
-        *exitcode = pymain_run_module(config->run_module, 1);
-    }
-    else if (main_importer_path != NULL) {
-        *exitcode = pymain_run_module(L"__main__", 0);
-    }
-    else if (config->run_filename != NULL) {
-        *exitcode = pymain_run_file(config, &cf);
-    }
-    else {
-        *exitcode = pymain_run_stdin(config, &cf);
-    }
+    DBG( "%s: Communication start: %d\n", __FUNCTION__, comm_progress);
+	while (comm_progress) {
+		if (*p_status == PY_ST_NEW_DATA) {
+			instr = *p_instr;
+			if (instr == PY_COMPILE) {
+				if (config->run_command) {
+					*exitcode = pymain_run_command(config->run_command, &cf);
+				}
+				else if (config->run_module) {
+					*exitcode = pymain_run_module(config->run_module, 1);
+				}
+				else if (main_importer_path != NULL) {
+					*exitcode = pymain_run_module(L"__main__", 0);
+				}
+				else if (config->run_filename != NULL) {
+					*exitcode = pymain_run_file(config, &cf);
+        			DBG( "%s: (pymain_run_file), retval: %d\n", __FUNCTION__, *exitcode);
+				}
+				else {
+					*exitcode = pymain_run_stdin(config, &cf);
+				}
+				
+				if (*exitcode >= 0) *p_status = PY_ST_CLIENT_OK; else *p_status = PY_ST_CLIENT_ERR;
+			}
+			
+			else if (instr == PY_GETSIGNAL) {
+				r_par = *p_input;
+				ret_val = PyMod_GetSignalValue("Signal", r_par, &r_result, &err_code);
+				*p_output = r_result;
+				if (err_code) {
+				 *p_status = PY_ST_CLIENT_ERR; 
+				 *p_err = err_code;
+				}
+			    else
+				 *p_status = PY_ST_CLIENT_OK; 
+			}
+			
+			else if (instr == PY_EXIT) {
+				*p_status = PY_ST_CLIENT_OK; 
+			}
+			
+			comm_progress = (*p_status == PY_ST_CLIENT_OK) && (instr != PY_EXIT) || (*p_status == PY_ST_NEW_DATA);
+			if (*p_status != PY_ST_NEW_DATA) {
+				if (instr != PY_GETSIGNAL) 
+				 DBG( "%s: instr: %d: executed, status: %d\n", __FUNCTION__, instr, *p_status);
+				else
+				 DBG( "%s: instr: %d, param: %f, result: %f, executed, status: %d\n", __FUNCTION__, instr, r_par, r_result, *p_status);
+			}
+		}
+		Sleep(10);
+	}
+	DBG( "%s: Exited from the loop\n", __FUNCTION__);
 
     //
     if (config->run_filename)
@@ -620,6 +738,9 @@ error:
     *exitcode = pymain_exit_err_print();
 
 done:
+    UnmapViewOfFile(pCommBuf);
+    CloseHandle(hMapFile);
+	
     Py_XDECREF(main_importer_path);
 }
 

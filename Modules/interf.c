@@ -541,4 +541,46 @@ error:
 	return 0;
 }
 
+int PyMod_GetSignalValue(const char* func_name, double r_par, double* r_result, int* err_code)
+{
+	wchar_t fn[512];
+	FILE *symbol_file;
+	int file_size, numread, nr, stream_pos;
+	char *p, *p0, *p1, *p_sym;
+	int *p_int, datapos, c, iID;
+	double rTmp;
+    Py_complex cval;
+	unsigned char NumType;
+
+    *err_code = 0;
+    PyObject* module = PyImport_AddModule("__main__"); // borrowed reference
+	if (!module) {
+        *err_code = PYSIGERR_OTHER;
+		goto error; 
+	}
+
+	PyObject* dictionary = PyModule_GetDict(module);   // borrowed reference
+	if (!dictionary) { 
+        *err_code = PYSIGERR_OTHER;
+		goto error; 
+	}
+
+    PyObject* evFunc = PyDict_GetItemString(dictionary, func_name);
+	if (!evFunc) {
+        *err_code = PYSIGERR_FUNC_NOT_FOUND;
+		goto error;  
+	}
+	
+	if (PyCallable_Check(evFunc)) {
+		PyObject* par = PyFloat_FromDouble(r_par);
+		PyObject* py_retval = PyObject_CallFunctionObjArgs(evFunc, par);
+        rTmp = PyFloat_AsDouble(py_retval);
+        *r_result = rTmp;
+	}
+	
+	return 1;
+	
+error:
+	return 0;
+}	
 

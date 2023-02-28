@@ -457,8 +457,16 @@ PyAPI_FUNC(void) Py_GetArgcArgv(int *argc, wchar_t ***argv);
 
 extern wchar_t session_folder[512];
 extern int error_state, symbols_in_found;
+extern FILE* log_file;
+extern wchar_t log_fn[512];
 
 void ExtractFilePath(wchar_t* dest, wchar_t* src);
+void py_init_log();
+void py_write_log(char* s);
+
+#define PYSIGERR_OTHER 1
+#define PYSIGERR_FUNC_NOT_FOUND 2
+
 
 #ifdef __cplusplus
 }
