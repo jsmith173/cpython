@@ -198,6 +198,7 @@ typedef struct {
 
     wchar_t *pycache_prefix;  /* PYTHONPYCACHEPREFIX, -X pycache_prefix=PATH */
     int parse_argv;           /* Parse argv command line arguments? */
+    wchar_t *shared_mem_id;  
 
     /* Command line arguments (sys.argv).
 

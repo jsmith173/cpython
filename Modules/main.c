@@ -565,6 +565,7 @@ pymain_repl(PyConfig *config, PyCompilerFlags *cf, int *exitcode)
 
 #define DTTMFMT "%Y-%m-%d %H:%M:%S "
 #define DTTMSZ 64
+#define TMP_BUF_SIZE 256
 static char *getDtTm (char *buff) {
     time_t t = time (0);
     strftime (buff, DTTMSZ, DTTMFMT, localtime (&t));
@@ -618,10 +619,9 @@ pymain_run_python(int *exitcode)
     pymain_import_readline(config);
 	
     //
-    TCHAR szName[] = TEXT("PyFileMappingObject1");
     HANDLE hMapFile;
-    LPCTSTR pCommBuf;
-	char time_buff[DTTMSZ];
+    LPCTSTR pCommBuf=NULL;
+	char time_buff[DTTMSZ], tmp_buff[TMP_BUF_SIZE];
 	char *p;
 	int *p_int, *p_instr, *p_status, *p_err, comm_en, instr, err_code, ret_val, comm_progress=1, c=0;
 	double *p_input, *p_output, r_par, r_result;
@@ -639,13 +639,15 @@ pymain_run_python(int *exitcode)
     #ifdef DEBUGMSG
     py_init_log();
 	#endif
-    DBG( "%s: log file created\n", getDtTm (time_buff));
+	wcstombs(tmp_buff, config->shared_mem_id, TMP_BUF_SIZE);
+    DBG( "%s: log file created: config->shared_mem_id: %s\n", getDtTm (time_buff), tmp_buff);
     hMapFile = OpenFileMapping(
         FILE_MAP_ALL_ACCESS,   // read/write access
         FALSE,                 // do not inherit the name
-        szName);               // name of mapping object
+        tmp_buff);             // name of mapping object
     if (hMapFile == NULL)
     {
+        DBG( "OpenFileMapping: ERROR\n");
         goto error;
     }
     DBG( "%s: OpenFileMapping: SUCCESS\n", __FUNCTION__);
@@ -738,8 +740,8 @@ error:
     *exitcode = pymain_exit_err_print();
 
 done:
-    UnmapViewOfFile(pCommBuf);
-    CloseHandle(hMapFile);
+    if (pCommBuf) UnmapViewOfFile(pCommBuf);
+    if (hMapFile) CloseHandle(hMapFile);
 	
     Py_XDECREF(main_importer_path);
 }

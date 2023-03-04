@@ -819,6 +819,7 @@ _PyConfig_Copy(PyConfig *config, const PyConfig *config2)
     COPY_ATTR(malloc_stats);
 
     COPY_WSTR_ATTR(pycache_prefix);
+    COPY_WSTR_ATTR(shared_mem_id);
     COPY_WSTR_ATTR(pythonpath_env);
     COPY_WSTR_ATTR(home);
     COPY_WSTR_ATTR(program_name);
@@ -1443,6 +1444,30 @@ config_init_pycache_prefix(PyConfig *config)
                               "PYTHONPYCACHEPREFIX");
 }
 
+static PyStatus
+config_init_shared_mem_id(PyConfig *config)
+{
+    assert(config->shared_mem_id == NULL);
+
+    const wchar_t *xoption = config_get_xoption(config, L"shared_mem_id");
+    if (xoption) {
+        const wchar_t *sep = wcschr(xoption, L'=');
+        if (sep && wcslen(sep) > 1) {
+            config->shared_mem_id = _PyMem_RawWcsdup(sep + 1);
+            if (config->shared_mem_id == NULL) {
+                return _PyStatus_NO_MEMORY();
+            }
+        }
+        else {
+            config->shared_mem_id = NULL;
+        }
+        return _PyStatus_OK();
+    }
+
+    return CONFIG_GET_ENV_DUP(config, &config->shared_mem_id,
+                              L"PYTHONSHAREDMEMID",
+                              "PYTHONSHAREDMEMID");
+}
 
 static PyStatus
 config_read_complex_options(PyConfig *config)
@@ -1474,6 +1499,13 @@ config_read_complex_options(PyConfig *config)
 
     if (config->pycache_prefix == NULL) {
         status = config_init_pycache_prefix(config);
+        if (_PyStatus_EXCEPTION(status)) {
+            return status;
+        }
+    }
+	
+    if (config->shared_mem_id == NULL) {
+        status = config_init_shared_mem_id(config);
         if (_PyStatus_EXCEPTION(status)) {
             return status;
         }
@@ -2774,10 +2806,21 @@ _Py_DumpPathConfig(PyThreadState *tstate)
     _PyErr_Restore(tstate, exc_type, exc_value, exc_tb);
 }
 
+#define USE_PROCESS_ID
+
 void py_init_log()
 {
+	DWORD process_id = GetCurrentProcessId();
+	wchar_t buffer[512];
+	
+	_itow( process_id, buffer, 10 );
+	
 	wcscpy(log_fn, session_folder);
-	wcscat(log_fn, L"cpython_log.txt");
+	wcscat(log_fn, L"cpython_log"); 
+	#ifdef USE_PROCESS_ID
+	wcscat(log_fn, L"_"); wcscat(log_fn, buffer);
+	#endif
+	wcscat(log_fn, L".txt");
 	
 	log_file = _wfopen(log_fn, L"wt");
 	fclose(log_file);
