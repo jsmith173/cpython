@@ -21,6 +21,18 @@
 #endif
 /* End of includes for exit_sigint() */
 
+//#define DEBUGMSG
+
+#ifdef DEBUGMSG
+#define DBG(fmt, ...) \
+ do { \
+	 log_file = _wfopen(log_fn, L"at"); \
+	 fprintf(log_file, fmt, ##__VA_ARGS__); \
+	 fclose(log_file); \
+ } while(0) 
+#else
+#define DBG
+#endif
 
 //
 const wchar_t* SYMBOLS_IN_FN = L"symbols_in.dat";
@@ -582,5 +594,65 @@ int PyMod_GetSignalValue(const char* func_name, double r_par, double* r_result, 
 	
 error:
 	return 0;
+}	
+
+#define FILE_NAME_LENGTH_MAX 512
+
+int PyMod_CompileFile(wchar_t* filename, int* err_code, char** msg)
+{
+	char fn_ansi[FILE_NAME_LENGTH_MAX];
+
+    *msg = NULL;
+	if (wcslen(filename) >= FILE_NAME_LENGTH_MAX) {
+        *err_code = PYSIGERR_OTHER;
+		goto error; 
+	}
+	
+	wcstombs(fn_ansi, filename, FILE_NAME_LENGTH_MAX); 
+	
+    *err_code = 0;
+    PyObject* module = PyImport_AddModule("__main__"); // borrowed reference
+	if (!module) {
+        *err_code = PYSIGERR_OTHER;
+		goto error; 
+	}
+
+	PyObject* dictionary = PyModule_GetDict(module);   // borrowed reference
+	if (!dictionary) { 
+        *err_code = PYSIGERR_OTHER;
+		goto error; 
+	}
+
+	char* err;
+	PyObject *ptype, *pvalue, *ptraceback, *str;
+    FILE* fp = fopen(fn_ansi, "r");
+    PyObject* fobj = PyRun_File(fp, fn_ansi, Py_file_input, dictionary, dictionary);
+	if (PyErr_Occurred()) {
+		PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+        PyErr_NormalizeException(&ptype, &pvalue, &ptraceback);
+		
+        str = PyObject_Str(pvalue);
+		if (str) {
+            PyObject* bytes = PyUnicode_AsUTF8String(str);
+            err = PyBytes_AsString(bytes);
+			*msg = calloc(strlen(err)+1, 1); strcpy(*msg, err);
+			Py_XDECREF(bytes);
+			*err_code = PYSIGERR_COMPILE_ERR;
+			fclose(fp);
+			return 1;
+		}	
+		else {
+			*err_code = PYSIGERR_OTHER;
+			fclose(fp);
+			return 1;
+		}
+	}
+	
+done:	
+	fclose(fp);
+	return 0;
+	
+error:
+	return 1;
 }	
 

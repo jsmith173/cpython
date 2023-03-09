@@ -2806,7 +2806,7 @@ _Py_DumpPathConfig(PyThreadState *tstate)
     _PyErr_Restore(tstate, exc_type, exc_value, exc_tb);
 }
 
-#define USE_PROCESS_ID
+//#define USE_PROCESS_ID
 
 void py_init_log()
 {
@@ -2822,7 +2822,7 @@ void py_init_log()
 	#endif
 	wcscat(log_fn, L".txt");
 	
-	log_file = _wfopen(log_fn, L"wt");
+	log_file = _wfopen(log_fn, L"at");
 	fclose(log_file);
 }
 
