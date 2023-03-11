@@ -622,7 +622,7 @@ pymain_run_python(int *exitcode)
     HANDLE hMapFile=0;
     LPCTSTR pCommBuf=NULL;
 	char time_buff[DTTMSZ], tmp_buff[TMP_BUF_SIZE];
-	char *p, *compile_msg, *p_compile_msg;
+	char *p, *other_msg, *p_other_msg;
 	int *p_int, *p_instr, *p_status, *p_err, comm_en=0, instr, err_code, ret_val, comm_progress=0, c=0;
 	double *p_input, *p_output, r_par, r_result;
 
@@ -632,8 +632,8 @@ pymain_run_python(int *exitcode)
 
 	#ifdef TESTING
 	//*exitcode = pymain_run_file(config, &cf);
-    PyMod_CompileFile(config->run_filename, &err_code, &compile_msg);
-	//ret_val = PyMod_GetSignalValue("Signal", 0.001, &r_result, &err_code);
+    PyMod_CompileFile(config->run_filename, &err_code, &other_msg);
+	ret_val = PyMod_GetSignalValue("Signal", 0.001, &r_result, &err_code, &other_msg);
 	return;
 	#endif
 	
@@ -675,7 +675,7 @@ pymain_run_python(int *exitcode)
 		p_int = (int*)p; p_err = p_int; p += sizeof(int);
 		p_input = (double*)p; p += sizeof(double);
 		p_output = (double*)p; p += sizeof(double);
-		p_compile_msg = p;
+		p_other_msg = p;
 	}
 
     if (config->run_filename) {
@@ -717,9 +717,9 @@ pymain_run_python(int *exitcode)
 					*exitcode = pymain_run_module(L"__main__", 0);
 				}
 				else if (config->run_filename != NULL) {
-                    *exitcode = PyMod_CompileFile(config->run_filename, &err_code, &compile_msg);
-                    if (compile_msg) strcpy(p_compile_msg, compile_msg); else strcpy(p_compile_msg, "");
-        			DBG( "%s: (pymain_run_file), retval: %d, msg: %s\n", __FUNCTION__, *exitcode, p_compile_msg);
+                    *exitcode = PyMod_CompileFile(config->run_filename, &err_code, &other_msg);
+                    if (other_msg) strcpy(p_other_msg, other_msg); else strcpy(p_other_msg, "");
+        			DBG( "%s: (pymain_run_file), retval: %d, msg: %s\n", __FUNCTION__, *exitcode, p_other_msg);
 				}
 				else {
 					*exitcode = pymain_run_stdin(config, &cf);
@@ -778,7 +778,7 @@ error:
 done:
     if (pCommBuf) UnmapViewOfFile(pCommBuf);
     if (hMapFile) CloseHandle(hMapFile);
-	if (compile_msg) free(compile_msg);
+	if (other_msg) free(other_msg);
 	
     Py_XDECREF(main_importer_path);
 }

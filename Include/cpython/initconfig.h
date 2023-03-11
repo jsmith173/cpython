@@ -464,11 +464,11 @@ extern wchar_t log_fn[512];
 void ExtractFilePath(wchar_t* dest, wchar_t* src);
 void py_init_log();
 void py_write_log(char* s);
-int PyMod_GetSignalValue(const char* func_name, double r_par, double* r_result, int* err_code);
 
 #define PYSIGERR_OTHER 1
 #define PYSIGERR_FUNC_NOT_FOUND 2
 #define PYSIGERR_COMPILE_ERR 3
+#define PYSIGERR_RUNTIME_ERROR 4
 
 
 #ifdef __cplusplus

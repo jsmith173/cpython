@@ -553,6 +553,8 @@ error:
 	return 0;
 }
 
+#define FILE_NAME_LENGTH_MAX 512
+
 int PyMod_GetSignalValue(const char* func_name, double r_par, double* r_result, int* err_code)
 {
 	wchar_t fn[512];
@@ -563,8 +565,10 @@ int PyMod_GetSignalValue(const char* func_name, double r_par, double* r_result, 
 	double rTmp;
     Py_complex cval;
 	unsigned char NumType;
+	char* err;
+	PyObject *ptype, *pvalue, *ptraceback, *str;
 
-    *err_code = 0;
+    *err_code = 0; 
     PyObject* module = PyImport_AddModule("__main__"); // borrowed reference
 	if (!module) {
         *err_code = PYSIGERR_OTHER;
@@ -586,17 +590,24 @@ int PyMod_GetSignalValue(const char* func_name, double r_par, double* r_result, 
 	if (PyCallable_Check(evFunc)) {
 		PyObject* par = PyFloat_FromDouble(r_par);
 		PyObject* py_retval = PyObject_CallFunctionObjArgs(evFunc, par);
-        rTmp = PyFloat_AsDouble(py_retval);
-        *r_result = rTmp;
+	
+		// PyErr_Fetch returning wrong error message so we are returning with an error code
+		if (py_retval) {
+			rTmp = PyFloat_AsDouble(py_retval);
+			*r_result = rTmp;
+		}
+		else {
+			*err_code = PYSIGERR_RUNTIME_ERROR;
+			*r_result = 0;
+			goto error;  
+		}
 	}
 	
-	return 1;
+	return 0;
 	
 error:
-	return 0;
+	return 1;
 }	
-
-#define FILE_NAME_LENGTH_MAX 512
 
 int PyMod_CompileFile(wchar_t* filename, int* err_code, char** msg)
 {
