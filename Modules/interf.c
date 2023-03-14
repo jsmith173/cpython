@@ -555,7 +555,7 @@ error:
 
 #define FILE_NAME_LENGTH_MAX 512
 
-int PyMod_GetSignalValue(const char* func_name, double r_par, double* r_result, int* err_code)
+int PyMod_GetSignalValue(const char* func_name, double r_par, double* r_result, int* err_code, char** msg)
 {
 	wchar_t fn[512];
 	FILE *symbol_file;
@@ -567,8 +567,10 @@ int PyMod_GetSignalValue(const char* func_name, double r_par, double* r_result, 
 	unsigned char NumType;
 	char* err;
 	PyObject *ptype, *pvalue, *ptraceback, *str;
+	PyObject* pArgs, *pValue;
+	int i, N=1;
 
-    *err_code = 0; 
+    *err_code = 0; *msg = NULL;
     PyObject* module = PyImport_AddModule("__main__"); // borrowed reference
 	if (!module) {
         *err_code = PYSIGERR_OTHER;
@@ -588,19 +590,51 @@ int PyMod_GetSignalValue(const char* func_name, double r_par, double* r_result, 
 	}
 	
 	if (PyCallable_Check(evFunc)) {
-		PyObject* par = PyFloat_FromDouble(r_par);
-		PyObject* py_retval = PyObject_CallFunctionObjArgs(evFunc, par);
-	
-		// PyErr_Fetch returning wrong error message so we are returning with an error code
-		if (py_retval) {
-			rTmp = PyFloat_AsDouble(py_retval);
+		pArgs = PyTuple_New(N);
+		for (i = 0; i < N; ++i) {
+			pValue = PyFloat_FromDouble(r_par);
+			if (!pValue) {
+				Py_DECREF(pArgs);
+				*err_code = PYSIGERR_OTHER;
+		        goto error;  
+			}
+			/* pValue reference stolen here: */
+			PyTuple_SetItem(pArgs, i, pValue);
+		}
+		pValue = PyObject_CallObject(evFunc, pArgs);
+		Py_DECREF(pArgs);
+			
+		if (PyErr_Occurred()) {
+			PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+			PyErr_NormalizeException(&ptype, &pvalue, &ptraceback);
+			
+			str = PyObject_Str(pvalue);
+			if (str) {
+				PyObject* bytes = PyUnicode_AsUTF8String(str);
+				err = PyBytes_AsString(bytes);
+				*msg = calloc(strlen(err)+1, 1); strcpy(*msg, err);
+				Py_XDECREF(bytes);
+				*err_code = PYSIGERR_RUNTIME_ERROR;
+				*r_result = 0;
+				goto error;  
+			}	
+			else {
+				*err_code = PYSIGERR_OTHER;
+				*r_result = 0;
+				goto error;  
+			}
+		}
+		else if (pValue && PyFloat_Check(pValue)) {
+			rTmp = PyFloat_AsDouble(pValue);
 			*r_result = rTmp;
 		}
 		else {
-			*err_code = PYSIGERR_RUNTIME_ERROR;
+			*err_code = PYSIGERR_OTHER;
 			*r_result = 0;
 			goto error;  
 		}
+		
+		
 	}
 	
 	return 0;

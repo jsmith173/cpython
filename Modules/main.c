@@ -737,7 +737,8 @@ pymain_run_python(int *exitcode)
 			
 			else if (instr == PY_GETSIGNAL) {
 				r_par = *p_input;
-				ret_val = PyMod_GetSignalValue("Signal", r_par, &r_result, &err_code);
+				ret_val = PyMod_GetSignalValue("Signal", r_par, &r_result, &err_code, &other_msg);
+                if (other_msg) strcpy(p_other_msg, other_msg); else strcpy(p_other_msg, "");
 				*p_output = r_result;
 				if (err_code) {
 				 *p_status = PY_ST_CLIENT_ERR; 
