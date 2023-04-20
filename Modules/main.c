@@ -622,7 +622,7 @@ pymain_run_python(int *exitcode)
     HANDLE hMapFile=0;
     LPCTSTR pCommBuf=NULL;
 	char time_buff[DTTMSZ], tmp_buff[TMP_BUF_SIZE];
-	char *p, *other_msg, *p_other_msg;
+	char *p, *other_msg=NULL, *p_other_msg;
 	int *p_int, *p_instr, *p_status, *p_err, comm_en=0, instr, err_code, ret_val, comm_progress=0, c=0;
 	double *p_input, *p_output, r_par, r_result;
 
