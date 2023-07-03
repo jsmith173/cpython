@@ -29,7 +29,7 @@
 	 log_file = _wfopen(log_fn, L"at"); \
 	 fprintf(log_file, fmt, ##__VA_ARGS__); \
 	 fclose(log_file); \
- } while(0) 
+ } while(0)
 #else
 #define DBG
 #endif
@@ -47,6 +47,11 @@ const wchar_t* CURVES_OUT_FN = L"curves_out.dat";
 #define I_REAL 0
 #define I_CPLX 1
 
+#define bSym_CircuitID 7
+#define bSym_PMBUS_Var 11
+
+#define PMBUS_BUF_MAX 16384
+
 #define DP_SAVE 1
 #define DP_CHECKSIZE 0
 
@@ -62,8 +67,13 @@ typedef struct _draw_pref_t {
 	wchar_t *pagename;
 	int flags;
 } draw_pref_t;
+
+typedef struct _circ_item_t {
+    int SimType;
+} circ_item_t;
 //
 
+circ_item_t* circ_items=NULL;
 
 int FileSize(const wchar_t* filename)
 {
@@ -117,17 +127,17 @@ int PyMod_AddCircuitVariables()
 	FILE *symbol_file;
 	int file_size, numread, nr, stream_pos;
 	char *p, *p0, *p1, *p_sym;
-	int *p_int, datapos, c, iID;
+	int *p_int, datapos, c, iID, nValues;
 	double rRe, rIm;
     Py_complex cval;
-	unsigned char NumType;
+	unsigned char NumType, SimType, *pmbus_buffer=NULL, tmp;
 
 	wcscpy(fn, session_folder);
 	wcscat(fn, SYMBOLS_IN_FN);
-	
+
     PyObject * module = PyImport_AddModule("__main__"); // borrowed reference
 	if (!module)
-		goto error; 
+		goto error;
 
 	PyObject * dictionary = PyModule_GetDict(module);   // borrowed reference
 	if (!dictionary) 
@@ -138,7 +148,7 @@ int PyMod_AddCircuitVariables()
     if (symbol_file) {
         file_size = FileSize(fn);
         circ_buffer_in = calloc(file_size, 1);
-        numread = fread(circ_buffer_in, 1, file_size, symbol_file);		
+        numread = fread(circ_buffer_in, 1, file_size, symbol_file);
         fclose(symbol_file);
     }
 	else
@@ -156,25 +166,41 @@ int PyMod_AddCircuitVariables()
 
 	c = *((int*)p); stream_pos += sizeof(int); p = p0+stream_pos;
 	num_of_circuit_symbols = c;
-	
+
+    circ_items = (circ_item_t*)calloc(num_of_circuit_symbols*sizeof(circ_item_t), 1);
+
 	for (int i=0; i<c; i++) {
- 	 NumType = *((unsigned char*)p); stream_pos += sizeof(unsigned char); p = p0+stream_pos;
  	 iID = *((int*)p); stream_pos += sizeof(int); p = p0+stream_pos;
+ 	 SimType = *((unsigned char*)p); stream_pos += sizeof(unsigned char); p = p0+stream_pos;
      p_sym = search_circuit_id(pos_strings, iID);
-	 
-	 if (NumType == I_REAL) {
- 	  rRe = *((double*)p); stream_pos += sizeof(double); p = p0+stream_pos;
-      PyDict_SetItemString(dictionary, p_sym, Py_BuildValue("d", rRe));
-	 }
-	 else if (NumType == I_CPLX) {
- 	  rRe = *((double*)p); stream_pos += sizeof(double); p = p0+stream_pos;
- 	  rIm = *((double*)p); stream_pos += sizeof(double); p = p0+stream_pos;
-	  cval.real = rRe;
-	  cval.imag = rIm;
-      PyDict_SetItemString(dictionary, p_sym, PyComplex_FromCComplex(cval));
+
+     circ_items[i].SimType = SimType;
+	 if (SimType == bSym_PMBUS_Var) {
+ 	  nValues = *((int*)p); stream_pos += sizeof(int); p = p0+stream_pos;
+      PyObject* pyList = PyList_New(nValues);
+      PyDict_SetItemString(dictionary, p_sym, pyList);
+      for (int j=0; j<nValues; j++) {
+       tmp = *((unsigned char*)p); stream_pos += sizeof(unsigned char); p = p0+stream_pos;
+       PyList_SetItem(pyList, j, Py_BuildValue("i", tmp));
+      }
 	 }
 	 else {
-		 /* set an error message */
+      NumType = *((unsigned char*)p); stream_pos += sizeof(unsigned char); p = p0+stream_pos;
+
+      if (NumType == I_REAL) {
+       rRe = *((double*)p); stream_pos += sizeof(double); p = p0+stream_pos;
+       PyDict_SetItemString(dictionary, p_sym, Py_BuildValue("d", rRe));
+      }
+      else if (NumType == I_CPLX) {
+       rRe = *((double*)p); stream_pos += sizeof(double); p = p0+stream_pos;
+       rIm = *((double*)p); stream_pos += sizeof(double); p = p0+stream_pos;
+       cval.real = rRe;
+       cval.imag = rIm;
+       PyDict_SetItemString(dictionary, p_sym, PyComplex_FromCComplex(cval));
+      }
+      else {
+          /* set an error message */
+      }
 	 }
 	}
 	
@@ -475,7 +501,7 @@ error:
 	return 0;
 
 	//
-	
+
 }
 
 int PyMod_SaveCircuitVariables()
@@ -485,32 +511,36 @@ int PyMod_SaveCircuitVariables()
 	PyObject *py_obj, *pValue, *pList, * pResult;
 	char *p, *p_sym;
 	double rRe, rIm, x, y, step;
-	int file_size, numwrite, i, N, j, M, nw, alloc_size, len;
+	int file_size, numwrite, i, N, j, M, nw, alloc_size, len, nValues;
 	void *circ_buffer_out, *curve_buffer_out;
     Py_complex cval;
-	unsigned char NumType;
+	unsigned char NumType, SimType, byte1;
 	draw_pref_t draw_pref;
-	
+
 
     PyObject * module = PyImport_AddModule("__main__"); // borrowed reference
 	if (!module)
-		goto error; 
+		goto error;
 
 	PyObject * dictionary = PyModule_GetDict(module);   // borrowed reference
-	if (!dictionary) 
-		goto error;  
+	if (!dictionary)
+		goto error;
 
     file_size = 2*sizeof(int);
-	file_size += num_of_circuit_symbols*(2*sizeof(double)+sizeof(unsigned char));
+	file_size += num_of_circuit_symbols*(2*sizeof(double)+sizeof(unsigned char))+PMBUS_BUF_MAX;
     circ_buffer_out = calloc(file_size, 1);
 
     p = circ_buffer_out;
 	*((int*)p) = error_state; p += sizeof(int);
 	*((int*)p) = num_of_circuit_symbols; p += sizeof(int);
-	
+
 	for (int i=0; i<num_of_circuit_symbols; i++) {
      p_sym = search_circuit_id(pos_strings, i);
      py_obj = PyDict_GetItem(dictionary, PyUnicode_FromString(p_sym));
+
+     SimType = circ_items[i].SimType;
+     *((unsigned char*)p) = SimType; p += sizeof(unsigned char);
+
 	 if (PyFloat_Check(py_obj)) {
  	  NumType = I_REAL; *((unsigned char*)p) = NumType; p += sizeof(unsigned char);
       rRe = PyFloat_AsDouble(py_obj);
@@ -529,11 +559,21 @@ int PyMod_SaveCircuitVariables()
  	  *((double*)p) = cval.real; p += sizeof(double);
  	  *((double*)p) = cval.imag; p += sizeof(double);
 	 }
+	 else if (PyList_Check(py_obj)) {
+      nValues = PyList_Size(py_obj);
+      *((int*)p) = nValues; p += sizeof(int);
+      for (int j=0; j<nValues; j++) {
+       pValue = PyList_GetItem(py_obj, j);
+       byte1 = PyLong_AsLong(pValue);
+  	   *((unsigned char*)p) = byte1; p += sizeof(unsigned char);
+      }
+	 }
 	 else {
 		 /* set an error message */
 	 }
+
 	}
-	
+
 	wcscpy(fn, session_folder);
 	wcscat(fn, SYMBOLS_OUT_FN);
     symbol_file = _wfopen(fn, L"wb");
